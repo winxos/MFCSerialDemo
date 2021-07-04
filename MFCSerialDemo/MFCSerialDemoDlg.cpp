@@ -239,7 +239,7 @@ int CMFCSerialDemoDlg::read_serial()
 
 	char str[100];
 	memset(str, 0, 100);
-	DWORD dwBytesRead = 100;//读取的字节数
+	DWORD dwBytesRead = 0;//读取的字节数
 	BOOL bReadStat;
 
 	ClearCommError(hCom, &dwErrorFlags, &ComStat);
@@ -248,11 +248,8 @@ int CMFCSerialDemoDlg::read_serial()
 	if (!bReadStat)
 	{
 		if (GetLastError() == ERROR_IO_PENDING)
-			//GetLastError()函数返回ERROR_IO_PENDING,表明串口正在进行读操作
 		{
 			WaitForSingleObject(m_osRead.hEvent, 2000);
-			//使用WaitForSingleObject函数等待，直到读操作完成或延时已达到2秒钟
-			//当串口读操作进行完毕后，m_osRead的hEvent事件会变为有信号
 		}
 	}
 	if (dwBytesRead > 0)
