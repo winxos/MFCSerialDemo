@@ -34,5 +34,9 @@ protected:
 public:
 	afx_msg void OnBnClickedButton1();
 	afx_msg int read_serial();
+	afx_msg BOOL find_port();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	CComboBox m_port;
+	CComboBox m_baud;
+	afx_msg void OnBnClickedButton2();
 };

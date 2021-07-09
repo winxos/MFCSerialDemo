@@ -59,6 +59,8 @@ CMFCSerialDemoDlg::CMFCSerialDemoDlg(CWnd* pParent /*=nullptr*/)
 void CMFCSerialDemoDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_COMBO1, m_port);
+	DDX_Control(pDX, IDC_COMBO2, m_baud);
 }
 
 BEGIN_MESSAGE_MAP(CMFCSerialDemoDlg, CDialogEx)
@@ -67,6 +69,7 @@ BEGIN_MESSAGE_MAP(CMFCSerialDemoDlg, CDialogEx)
 	ON_WM_QUERYDRAGICON()
 	ON_BN_CLICKED(IDC_BUTTON1, &CMFCSerialDemoDlg::OnBnClickedButton1)
 	ON_WM_TIMER()
+	ON_BN_CLICKED(IDC_BUTTON2, &CMFCSerialDemoDlg::OnBnClickedButton2)
 END_MESSAGE_MAP()
 
 
@@ -74,6 +77,65 @@ END_MESSAGE_MAP()
 OVERLAPPED m_osWrite;
 OVERLAPPED m_osRead;
 HANDLE hCom;  //全局变量，串口句柄
+BOOL CMFCSerialDemoDlg::find_port()
+{
+	long lReg;
+	HKEY hKey;
+	DWORD MaxValueLength;
+	DWORD dwValueNumber;
+	lReg = RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("HARDWARE\\DEVICEMAP\\SERIALCOMM"),
+		0, KEY_QUERY_VALUE, &hKey);
+	if (lReg != ERROR_SUCCESS) //成功时返回ERROR_SUCCESS，
+	{
+		AfxMessageBox(TEXT("Open Registry Error!\n"));
+		return FALSE;
+	}
+
+	lReg = RegQueryInfoKey(hKey, NULL, NULL, NULL, NULL, NULL, NULL,
+		&dwValueNumber, &MaxValueLength, NULL, NULL, NULL);
+
+	if (lReg != ERROR_SUCCESS) //没有成功
+	{
+		AfxMessageBox(TEXT("Getting Info Error!\n"));
+		return FALSE;
+	}
+
+	TCHAR* pValueName, * pCOMNumber;
+	DWORD cchValueName, dwValueSize = 10;
+
+	for (int i = 0; i < dwValueNumber; i++)
+	{
+		cchValueName = MaxValueLength + 1;
+		dwValueSize = 10;
+		pValueName = (TCHAR*)VirtualAlloc(NULL, cchValueName, MEM_COMMIT, PAGE_READWRITE);
+		lReg = RegEnumValue(hKey, i, pValueName,
+			&cchValueName, NULL, NULL, NULL, NULL);
+
+		if ((lReg != ERROR_SUCCESS) && (lReg != ERROR_NO_MORE_ITEMS))
+		{
+			AfxMessageBox(TEXT("Enum Registry Error or No More Items!\n"));
+			return FALSE;
+		}
+
+		pCOMNumber = (TCHAR*)VirtualAlloc(NULL, 6, MEM_COMMIT, PAGE_READWRITE);
+		lReg = RegQueryValueEx(hKey, pValueName, NULL,
+			NULL, (LPBYTE)pCOMNumber, &dwValueSize);
+
+		if (lReg != ERROR_SUCCESS)
+		{
+			AfxMessageBox(TEXT("Can not get the name of the port"));
+			return FALSE;
+		}
+
+		CString str(pCOMNumber);
+		m_port.AddString(str); //把获取的值加入到ComBox控件中
+
+		VirtualFree(pValueName, 0, MEM_RELEASE);
+		VirtualFree(pCOMNumber, 0, MEM_RELEASE);
+	}
+	m_port.SetCurSel(0);
+	return true;
+}
 BOOL CMFCSerialDemoDlg::OnInitDialog()
 {
 	CDialogEx::OnInitDialog();
@@ -103,42 +165,15 @@ BOOL CMFCSerialDemoDlg::OnInitDialog()
 	SetIcon(m_hIcon, TRUE);			// 设置大图标
 	SetIcon(m_hIcon, FALSE);		// 设置小图标
 	// TODO: 在此添加额外的初始化代码
-	hCom = CreateFile(_T("COM2"), //change to your port
-		GENERIC_READ | GENERIC_WRITE,
-		0,
-		NULL,
-		OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, //
-		NULL);
-	if (hCom == INVALID_HANDLE_VALUE)
+	int baud[] = { 9600,115200 };
+	for (int i = 0; i < 2; i++)
 	{
-		AfxMessageBox(_T("打开COM失败!"));
+		CString b;
+		b.Format(_T("%d"), baud[i]);
+		m_baud.AddString(b);
 	}
-	SetupComm(hCom, 100, 100);
-
-	COMMTIMEOUTS TimeOuts;
-	//设定读超时
-	TimeOuts.ReadIntervalTimeout = 1000;
-	TimeOuts.ReadTotalTimeoutMultiplier = 500;
-	TimeOuts.ReadTotalTimeoutConstant = 5000;
-	//设定写超时
-	TimeOuts.WriteTotalTimeoutMultiplier = 500;
-	TimeOuts.WriteTotalTimeoutConstant = 2000;
-	SetCommTimeouts(hCom, &TimeOuts); //设置超时
-
-	DCB dcb;
-	GetCommState(hCom, &dcb);
-	dcb.BaudRate = 9600; //波特率为9600
-	dcb.ByteSize = 8; 
-	dcb.Parity = NOPARITY;
-	dcb.StopBits = ONESTOPBIT;
-	SetCommState(hCom, &dcb);
-
-	PurgeComm(hCom, PURGE_TXCLEAR | PURGE_RXCLEAR);
-	SetTimer(1, 10, NULL); //10 ms check
-	memset(&m_osRead, 0, sizeof(OVERLAPPED));
-	m_osRead.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-
+	m_baud.SetCurSel(0);
+	find_port();
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
 }
 
@@ -204,10 +239,8 @@ void CMFCSerialDemoDlg::OnBnClickedButton1()
 	memset(&m_osWrite, 0, sizeof(OVERLAPPED));
 	m_osWrite.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	CString input;
-	GetDlgItem(IDC_EDIT1)->GetWindowTextW(input);
-	char buf[100] = { 0 };
-	WideCharToMultiByte(CP_OEMCP, NULL, input, -1, buf, input.GetLength(), NULL, FALSE);
-	bWriteStat = WriteFile(hCom, buf, input.GetLength(), &dwBytesWrite, &m_osWrite);
+	GetDlgItem(IDC_EDIT1)->GetWindowText(input);
+	bWriteStat = WriteFile(hCom, input, input.GetLength(), &dwBytesWrite, &m_osWrite);
 	if (!bWriteStat)
 	{
 		if (GetLastError() == ERROR_IO_PENDING)
@@ -243,7 +276,11 @@ int CMFCSerialDemoDlg::read_serial()
 	BOOL bReadStat;
 
 	ClearCommError(hCom, &dwErrorFlags, &ComStat);
-	dwBytesRead = min(dwBytesRead, (DWORD)ComStat.cbInQue);
+	dwBytesRead = (DWORD)ComStat.cbInQue;
+	if (dwBytesRead <= 0)
+	{
+		return 0;
+	}
 	bReadStat = ReadFile(hCom, str, dwBytesRead, &dwBytesRead, &m_osRead);
 	if (!bReadStat)
 	{
@@ -252,16 +289,62 @@ int CMFCSerialDemoDlg::read_serial()
 			WaitForSingleObject(m_osRead.hEvent, 2000);
 		}
 	}
-	if (dwBytesRead > 0)
-	{
-		CString r;
-		GetDlgItem(IDC_EDIT2)->GetWindowTextW(r);
-		CStringW s = r + "\r\n";
-		s += CA2W(str);
-		GetDlgItem(IDC_EDIT2)->SetWindowTextW(s);
-		UpdateData(FALSE);
-	}
+	CString r;
+	GetDlgItem(IDC_EDIT2)->GetWindowText(r);
+	CString s = r + "\r\n" + str;
+	GetDlgItem(IDC_EDIT2)->SetWindowText(s);
+	UpdateData(FALSE);
 	PurgeComm(hCom, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
 
 	return 0;
+}
+
+
+void CMFCSerialDemoDlg::OnBnClickedButton2()
+{
+	// TODO: 在此添加控件通知处理程序代码
+	UpdateData();
+	CString port;
+	m_port.GetWindowTextA(port);
+	HANDLE tmp = CreateFile(port, //change to your port
+		GENERIC_READ | GENERIC_WRITE,
+		0,
+		NULL,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, //
+		NULL);
+	if (tmp == INVALID_HANDLE_VALUE) //already open
+	{
+		GetDlgItem(IDC_BUTTON2)->SetWindowText("打开");
+		CloseHandle(hCom);
+		return;
+	}
+	hCom = tmp;
+	SetupComm(hCom, 100, 100);
+
+	COMMTIMEOUTS TimeOuts;
+	//设定读超时
+	TimeOuts.ReadIntervalTimeout = 1000;
+	TimeOuts.ReadTotalTimeoutMultiplier = 500;
+	TimeOuts.ReadTotalTimeoutConstant = 5000;
+	//设定写超时
+	TimeOuts.WriteTotalTimeoutMultiplier = 500;
+	TimeOuts.WriteTotalTimeoutConstant = 2000;
+	SetCommTimeouts(hCom, &TimeOuts); //设置超时
+
+	DCB dcb;
+	GetCommState(hCom, &dcb);
+	CString baud;
+	m_baud.GetWindowTextA(baud);
+	dcb.BaudRate = _ttoi(baud);
+	dcb.ByteSize = 8;
+	dcb.Parity = NOPARITY;
+	dcb.StopBits = ONESTOPBIT;
+	SetCommState(hCom, &dcb);
+
+	PurgeComm(hCom, PURGE_TXCLEAR | PURGE_RXCLEAR);
+	SetTimer(1, 10, NULL); //10 ms check
+	memset(&m_osRead, 0, sizeof(OVERLAPPED));
+	m_osRead.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	GetDlgItem(IDC_BUTTON2)->SetWindowText(_T("关闭"));
 }
