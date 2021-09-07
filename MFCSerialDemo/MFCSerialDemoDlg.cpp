@@ -294,8 +294,9 @@ int CMFCSerialDemoDlg::read_serial()
 	CString s = r + "\r\n" + str;
 	GetDlgItem(IDC_EDIT2)->SetWindowText(s);
 	UpdateData(FALSE);
+	CEdit* pe = (CEdit*)GetDlgItem(IDC_EDIT2);
+	pe->LineScroll(pe->GetLineCount());
 	PurgeComm(hCom, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
-
 	return 0;
 }
 
